@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flappy Bird</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: "Segoe UI", Tahoma, sans-serif;
+    background: linear-gradient(180deg, #4ec0ca 0%, #71c5cf 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    overflow: hidden;
+  }
+
+  /* ===== מסך התחברות ===== */
+  #login {
+    background: #fff;
+    padding: 40px 35px;
+    border-radius: 18px;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.25);
+    width: 320px;
+    text-align: center;
+  }
+  #login h1 {
+    color: #f7a800;
+    font-size: 32px;
+    margin-bottom: 6px;
+    text-shadow: 2px 2px 0 #d97e00;
+  }
+  #login p.sub { color: #888; margin-bottom: 22px; font-size: 14px; }
+  #login input {
+    width: 100%;
+    padding: 12px 14px;
+    margin-bottom: 14px;
+    border: 2px solid #ddd;
+    border-radius: 10px;
+    font-size: 15px;
+    outline: none;
+    transition: border-color .2s;
+  }
+  #login input:focus { border-color: #4ec0ca; }
+  #login button {
+    width: 100%;
+    padding: 13px;
+    background: #f7a800;
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    font-size: 17px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background .2s, transform .1s;
+  }
+  #login button:hover { background: #e09600; }
+  #login button:active { transform: scale(0.97); }
+  #login .hint {
+    margin-top: 16px;
+    font-size: 12px;
+    color: #aaa;
+    background: #f5f5f5;
+    padding: 8px;
+    border-radius: 8px;
+  }
+  #error { color: #e74c3c; font-size: 13px; min-height: 18px; margin-bottom: 8px; }
+
+  /* ===== מסך משחק ===== */
+  #game-wrap { display: none; flex-direction: column; align-items: center; }
+  canvas {
+    border: 4px solid #fff;
+    border-radius: 12px;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.3);
+    display: block;
+    background: #70c5ce;
+  }
+  #topbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    margin-bottom: 10px;
+    color: #fff;
+    font-weight: bold;
+    text-shadow: 1px 1px 2px rgba(0,0,0,0.3);
+  }
+  #logout {
+    background: rgba(255,255,255,0.85);
+    color: #333;
+    border: none;
+    padding: 6px 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: bold;
+  }
+  #logout:hover { background: #fff; }
+</style>
+</head>
+<body>
+
+  <!-- מסך התחברות -->
+  <div id="login">
+    <h1>Flappy Bird</h1>
+    <p class="sub">התחברות למשחק</p>
+    <div id="error"></div>
+    <input type="text" id="username" placeholder="שם משתמש" autocomplete="off">
+    <input type="password" id="password" placeholder="סיסמה">
+    <button id="loginBtn">כניסה</button>
+    <div class="hint">פרטי כניסה דיפולטיביים:<br>משתמש: <b>admin</b> | סיסמה: <b>1234</b></div>
+  </div>
+
+  <!-- מסך משחק -->
+  <div id="game-wrap">
+    <div id="topbar">
+      <span id="welcome"></span>
+      <button id="logout">התנתקות</button>
+    </div>
+    <canvas id="game" width="400" height="600"></canvas>
+  </div>
+
+<script>
+/* ===================== התחברות ===================== */
+const DEFAULT_USER = "admin";
+const DEFAULT_PASS = "1234";
+
+const loginEl   = document.getElementById("login");
+const gameWrap  = document.getElementById("game-wrap");
+const errorEl   = document.getElementById("error");
+const usernameI = document.getElementById("username");
+const passwordI = document.getElementById("password");
+
+function tryLogin() {
+  const u = usernameI.value.trim();
+  const p = passwordI.value;
+  if (u === DEFAULT_USER && p === DEFAULT_PASS) {
+    errorEl.textContent = "";
+    loginEl.style.display = "none";
+    gameWrap.style.display = "flex";
+    document.getElementById("welcome").textContent = "שלום, " + u + " 👋";
+    startGame();
+  } else {
+    errorEl.textContent = "שם משתמש או סיסמה שגויים";
+    passwordI.value = "";
+  }
+}
+
+document.getElementById("loginBtn").addEventListener("click", tryLogin);
+passwordI.addEventListener("keydown", e => { if (e.key === "Enter") tryLogin(); });
+usernameI.addEventListener("keydown", e => { if (e.key === "Enter") passwordI.focus(); });
+
+document.getElementById("logout").addEventListener("click", () => {
+  gameWrap.style.display = "none";
+  loginEl.style.display = "block";
+  usernameI.value = "";
+  passwordI.value = "";
+  stopGame();
+});
+
+/* ===================== המשחק ===================== */
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+const W = canvas.width, H = canvas.height;
+
+let bird, pipes, score, best = 0, gameState, frame, rafId;
+
+const GRAVITY = 0.45;
+const JUMP = -7.8;
+const PIPE_GAP = 160;
+const PIPE_WIDTH = 60;
+const PIPE_SPEED = 2.4;
+const PIPE_INTERVAL = 100; // פריימים בין צינורות
+
+function resetGame() {
+  bird = { x: 90, y: H/2, r: 15, vy: 0, rot: 0 };
+  pipes = [];
+  score = 0;
+  frame = 0;
+  gameState = "ready"; // ready | playing | over
+}
+
+function flap() {
+  if (gameState === "ready") { gameState = "playing"; bird.vy = JUMP; }
+  else if (gameState === "playing") { bird.vy = JUMP; }
+  else if (gameState === "over") { resetGame(); }
+}
+
+function spawnPipe() {
+  const minTop = 60;
+  const maxTop = H - PIPE_GAP - 120;
+  const topH = minTop + Math.random() * (maxTop - minTop);
+  pipes.push({ x: W, top: topH, passed: false });
+}
+
+function update() {
+  if (gameState !== "playing") return;
+
+  bird.vy += GRAVITY;
+  bird.y += bird.vy;
+  bird.rot = Math.max(-0.4, Math.min(1.4, bird.vy / 10));
+
+  // צינור ראשון נוצר רק אחרי השהיה קצרה, ואז כל PIPE_INTERVAL פריימים
+  if (frame >= PIPE_INTERVAL && frame % PIPE_INTERVAL === 0) spawnPipe();
+
+  for (let i = pipes.length - 1; i >= 0; i--) {
+    const p = pipes[i];
+    p.x -= PIPE_SPEED;
+
+    // ניקוד
+    if (!p.passed && p.x + PIPE_WIDTH < bird.x) {
+      p.passed = true;
+      score++;
+    }
+
+    // התנגשות
+    const inX = bird.x + bird.r > p.x && bird.x - bird.r < p.x + PIPE_WIDTH;
+    const hitTop = bird.y - bird.r < p.top;
+    const hitBottom = bird.y + bird.r > p.top + PIPE_GAP;
+    if (inX && (hitTop || hitBottom)) gameOver();
+
+    if (p.x + PIPE_WIDTH < 0) pipes.splice(i, 1);
+  }
+
+  // קרקע / תקרה
+  if (bird.y + bird.r > H - 30 || bird.y - bird.r < 0) gameOver();
+
+  frame++;
+}
+
+function gameOver() {
+  gameState = "over";
+  if (score > best) best = score;
+}
+
+/* ---------- ציור ---------- */
+function drawBird() {
+  ctx.save();
+  ctx.translate(bird.x, bird.y);
+  ctx.rotate(bird.rot);
+  // גוף
+  ctx.fillStyle = "#f7d51d";
+  ctx.beginPath();
+  ctx.arc(0, 0, bird.r, 0, Math.PI*2);
+  ctx.fill();
+  // כנף
+  ctx.fillStyle = "#f5a623";
+  ctx.beginPath();
+  ctx.ellipse(-4, 3, 8, 5, 0, 0, Math.PI*2);
+  ctx.fill();
+  // עין
+  ctx.fillStyle = "#fff";
+  ctx.beginPath();
+  ctx.arc(6, -5, 5, 0, Math.PI*2);
+  ctx.fill();
+  ctx.fillStyle = "#000";
+  ctx.beginPath();
+  ctx.arc(7, -5, 2.3, 0, Math.PI*2);
+  ctx.fill();
+  // מקור
+  ctx.fillStyle = "#e8541f";
+  ctx.beginPath();
+  ctx.moveTo(12, 0);
+  ctx.lineTo(22, 2);
+  ctx.lineTo(12, 6);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawPipe(p) {
+  const grad = ctx.createLinearGradient(p.x, 0, p.x + PIPE_WIDTH, 0);
+  grad.addColorStop(0, "#5db021");
+  grad.addColorStop(0.5, "#73c727");
+  grad.addColorStop(1, "#4e9a1d");
+  ctx.fillStyle = grad;
+  // צינור עליון
+  ctx.fillRect(p.x, 0, PIPE_WIDTH, p.top);
+  ctx.fillRect(p.x - 4, p.top - 22, PIPE_WIDTH + 8, 22);
+  // צינור תחתון
+  const by = p.top + PIPE_GAP;
+  ctx.fillRect(p.x, by, PIPE_WIDTH, H - by);
+  ctx.fillRect(p.x - 4, by, PIPE_WIDTH + 8, 22);
+}
+
+function draw() {
+  // רקע
+  ctx.fillStyle = "#70c5ce";
+  ctx.fillRect(0, 0, W, H);
+
+  // ענני רקע פשוטים
+  ctx.fillStyle = "rgba(255,255,255,0.5)";
+  ctx.beginPath(); ctx.arc(80, 100, 28, 0, Math.PI*2); ctx.arc(115, 100, 34, 0, Math.PI*2); ctx.arc(150, 100, 26, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(290, 180, 24, 0, Math.PI*2); ctx.arc(320, 180, 30, 0, Math.PI*2); ctx.fill();
+
+  pipes.forEach(drawPipe);
+
+  // קרקע
+  ctx.fillStyle = "#ded895";
+  ctx.fillRect(0, H - 30, W, 30);
+  ctx.fillStyle = "#5db021";
+  ctx.fillRect(0, H - 30, W, 8);
+
+  drawBird();
+
+  // ניקוד
+  ctx.fillStyle = "#fff";
+  ctx.strokeStyle = "#000";
+  ctx.lineWidth = 3;
+  ctx.font = "bold 42px Segoe UI";
+  ctx.textAlign = "center";
+  ctx.strokeText(score, W/2, 70);
+  ctx.fillText(score, W/2, 70);
+
+  if (gameState === "ready") {
+    overlayText("לחצו / רווח כדי לעוף", "התחילו לשחק!");
+  } else if (gameState === "over") {
+    overlayText("המשחק נגמר", "ניקוד: " + score + "   |   שיא: " + best, "לחצו כדי לשחק שוב");
+  }
+}
+
+function overlayText(title, line1, line2) {
+  ctx.fillStyle = "rgba(0,0,0,0.45)";
+  ctx.fillRect(0, H/2 - 90, W, 180);
+  ctx.fillStyle = "#fff";
+  ctx.textAlign = "center";
+  ctx.font = "bold 30px Segoe UI";
+  ctx.fillText(title, W/2, H/2 - 30);
+  ctx.font = "20px Segoe UI";
+  ctx.fillText(line1, W/2, H/2 + 10);
+  if (line2) { ctx.font = "16px Segoe UI"; ctx.fillText(line2, W/2, H/2 + 45); }
+}
+
+// לולאה עם צעד זמן קבוע (60 עדכונים בשנייה) — כדי שהמהירות תהיה זהה
+// בכל מסך, גם במסכי 120Hz/144Hz.
+const STEP = 1000 / 60;
+let lastTime = 0, acc = 0;
+
+function loop(now) {
+  if (!lastTime) lastTime = now;
+  let delta = now - lastTime;
+  lastTime = now;
+  if (delta > 250) delta = 250; // הגנה אחרי שהמסך/הטאב היה לא פעיל
+  acc += delta;
+  while (acc >= STEP) { update(); acc -= STEP; }
+  draw();
+  rafId = requestAnimationFrame(loop);
+}
+
+/* ---------- שליטה ---------- */
+function onKey(e) {
+  if (e.code === "Space" || e.code === "ArrowUp") { e.preventDefault(); flap(); }
+}
+function onClick() { flap(); }
+
+function startGame() {
+  resetGame();
+  lastTime = 0; acc = 0;
+  document.addEventListener("keydown", onKey);
+  canvas.addEventListener("mousedown", onClick);
+  canvas.addEventListener("touchstart", onClick, { passive: true });
+  if (!rafId) rafId = requestAnimationFrame(loop);
+}
+
+function stopGame() {
+  document.removeEventListener("keydown", onKey);
+  canvas.removeEventListener("mousedown", onClick);
+  canvas.removeEventListener("touchstart", onClick);
+  cancelAnimationFrame(rafId);
+  rafId = null;
+}
+</script>
+</body>
+</html>
