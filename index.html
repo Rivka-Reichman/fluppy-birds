@@ -66,6 +66,9 @@
     border-radius: 8px;
   }
   #error { color: #e74c3c; font-size: 13px; min-height: 18px; margin-bottom: 8px; }
+  #login .toggle { margin-top: 14px; font-size: 13px; color: #888; }
+  #login .toggle a { color: #4ec0ca; font-weight: bold; text-decoration: none; cursor: pointer; }
+  #login .toggle a:hover { text-decoration: underline; }
 
   /* ===== מסך משחק ===== */
   #game-wrap { display: none; flex-direction: column; align-items: center; }
@@ -104,12 +107,10 @@
   <!-- מסך התחברות -->
   <div id="login">
     <h1>Flappy Bird</h1>
-    <p class="sub">התחברות למשחק</p>
+    <p class="sub">הזינו שם כדי להתחיל</p>
     <div id="error"></div>
-    <input type="text" id="username" placeholder="שם משתמש" autocomplete="off">
-    <input type="password" id="password" placeholder="סיסמה">
+    <input type="text" id="username" placeholder="השם שלך" autocomplete="off">
     <button id="loginBtn">כניסה</button>
-    <div class="hint">פרטי כניסה דיפולטיביים:<br>משתמש: <b>admin</b> | סיסמה: <b>1234</b></div>
   </div>
 
   <!-- מסך משחק -->
@@ -122,40 +123,30 @@
   </div>
 
 <script>
-/* ===================== התחברות ===================== */
-const DEFAULT_USER = "admin";
-const DEFAULT_PASS = "1234";
-
+/* ===================== כניסה (שם בלבד) ===================== */
 const loginEl   = document.getElementById("login");
 const gameWrap  = document.getElementById("game-wrap");
 const errorEl   = document.getElementById("error");
 const usernameI = document.getElementById("username");
-const passwordI = document.getElementById("password");
+const loginBtn  = document.getElementById("loginBtn");
 
-function tryLogin() {
-  const u = usernameI.value.trim();
-  const p = passwordI.value;
-  if (u === DEFAULT_USER && p === DEFAULT_PASS) {
-    errorEl.textContent = "";
-    loginEl.style.display = "none";
-    gameWrap.style.display = "flex";
-    document.getElementById("welcome").textContent = "שלום, " + u + " 👋";
-    startGame();
-  } else {
-    errorEl.textContent = "שם משתמש או סיסמה שגויים";
-    passwordI.value = "";
-  }
+function enterGame() {
+  const name = usernameI.value.trim();
+  if (!name) { errorEl.textContent = "נא להזין שם"; return; }
+  errorEl.textContent = "";
+  loginEl.style.display = "none";
+  gameWrap.style.display = "flex";
+  document.getElementById("welcome").textContent = "שלום, " + name + " 👋";
+  startGame();
 }
 
-document.getElementById("loginBtn").addEventListener("click", tryLogin);
-passwordI.addEventListener("keydown", e => { if (e.key === "Enter") tryLogin(); });
-usernameI.addEventListener("keydown", e => { if (e.key === "Enter") passwordI.focus(); });
+loginBtn.addEventListener("click", enterGame);
+usernameI.addEventListener("keydown", e => { if (e.key === "Enter") enterGame(); });
 
 document.getElementById("logout").addEventListener("click", () => {
   gameWrap.style.display = "none";
   loginEl.style.display = "block";
   usernameI.value = "";
-  passwordI.value = "";
   stopGame();
 });
 
@@ -164,7 +155,7 @@ const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 const W = canvas.width, H = canvas.height;
 
-let bird, pipes, score, best = 0, gameState, frame, rafId;
+let bird, pipes, score, best = 0, gameState, frame, rafId, lives, invincible;
 
 const GRAVITY = 0.45;
 const JUMP = -7.8;
@@ -172,12 +163,17 @@ const PIPE_GAP = 160;
 const PIPE_WIDTH = 60;
 const PIPE_SPEED = 2.4;
 const PIPE_INTERVAL = 100; // פריימים בין צינורות
+const HOME_X = 90;         // מיקום ה-x הקבוע של הציפור
+const START_LIVES = 3;     // מספר הלבבות בתחילת המשחק
+const INVINCIBLE_FRAMES = 90; // משך החסינות אחרי פגיעה (~1.5 שניות)
 
 function resetGame() {
-  bird = { x: 90, y: H/2, r: 15, vy: 0, rot: 0 };
+  bird = { x: HOME_X, y: H/2, r: 15, vy: 0, rot: 0 };
   pipes = [];
   score = 0;
   frame = 0;
+  lives = START_LIVES;
+  invincible = 0;
   gameState = "ready"; // ready | playing | over
 }
 
@@ -201,6 +197,8 @@ function update() {
   bird.y += bird.vy;
   bird.rot = Math.max(-0.4, Math.min(1.4, bird.vy / 10));
 
+  if (invincible > 0) invincible--;
+
   // צינור ראשון נוצר רק אחרי השהיה קצרה, ואז כל PIPE_INTERVAL פריימים
   if (frame >= PIPE_INTERVAL && frame % PIPE_INTERVAL === 0) spawnPipe();
 
@@ -214,17 +212,25 @@ function update() {
       score++;
     }
 
-    // התנגשות
+    // פגיעה בצינור מורידה לב אחד (לא פוסלת מיד) ונותנת חסינות קצרה
     const inX = bird.x + bird.r > p.x && bird.x - bird.r < p.x + PIPE_WIDTH;
     const hitTop = bird.y - bird.r < p.top;
     const hitBottom = bird.y + bird.r > p.top + PIPE_GAP;
-    if (inX && (hitTop || hitBottom)) gameOver();
+    if (invincible === 0 && inX && (hitTop || hitBottom)) {
+      lives--;
+      invincible = INVINCIBLE_FRAMES;
+      bird.vy = JUMP * 0.7; // נדנוד קטן כלפי מעלה כדי להתרחק מהפגיעה
+      if (lives <= 0) gameOver();
+    }
 
     if (p.x + PIPE_WIDTH < 0) pipes.splice(i, 1);
   }
 
-  // קרקע / תקרה
-  if (bird.y + bird.r > H - 30 || bird.y - bird.r < 0) gameOver();
+  // מצמידים את הציפור לתקרה כדי שלא תצא מהמסך (בלי פסילה)
+  if (bird.y - bird.r < 0) { bird.y = bird.r; bird.vy = 0; }
+
+  // נפילה לקרקע מסיימת את המשחק מיד
+  if (bird.y + bird.r > H - 30) gameOver();
 
   frame++;
 }
@@ -301,7 +307,8 @@ function draw() {
   ctx.fillStyle = "#5db021";
   ctx.fillRect(0, H - 30, W, 8);
 
-  drawBird();
+  // הציפור מהבהבת בזמן חסינות (אחרי פגיעה)
+  if (invincible === 0 || Math.floor(invincible / 6) % 2 === 0) drawBird();
 
   // ניקוד
   ctx.fillStyle = "#fff";
@@ -311,6 +318,13 @@ function draw() {
   ctx.textAlign = "center";
   ctx.strokeText(score, W/2, 70);
   ctx.fillText(score, W/2, 70);
+
+  // לבבות (חיים שנותרו)
+  ctx.font = "24px Segoe UI";
+  ctx.textAlign = "left";
+  let hearts = "";
+  for (let k = 0; k < START_LIVES; k++) hearts += (k < lives ? "❤️" : "🤍");
+  ctx.fillText(hearts, 12, 36);
 
   if (gameState === "ready") {
     overlayText("לחצו / רווח כדי לעוף", "התחילו לשחק!");
